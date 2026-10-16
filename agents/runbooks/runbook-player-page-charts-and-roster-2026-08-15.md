@@ -69,6 +69,12 @@ which is **distinct from `[]`** — that distinction has caused a bug before).
 
 ## BattleHistoryCard — the strip domain, the default, and the fallback (2026-08-19, v5.4.1)
 
+> **Superseded in part, 2026-10-16 (v5.12.0): the card now opens on 90d.** The
+> section below is kept as the record of the Month-era arrangement, because
+> the two ordering traps it documents are still live for a reader whose
+> STORED pick is a narrow window. See "The 90d default" at the end of this
+> section for what changed and what was retired.
+
 **The strip shows 30 days on Day/Week/Month and 60 on the 60d pill.** It still
 HOLDS all 60 at every setting: days outside the shown domain are positioned at a
 negative x and clipped by the viewport, never unmounted. That is what makes the
@@ -117,6 +123,34 @@ A consequence to expect rather than treat as a bug: the bracket dissolves
 whenever the span equals the shown domain, so with a 30-day backdrop it is
 visible only on Day and Week — at Month it now reads as full-width and
 transparent, as it already did at 60d.
+
+### The 90d default (2026-10-16, v5.12.0)
+
+`DEFAULT_BATTLE_HISTORY_WINDOW = 'ninety'`. The card opens on the widest pill,
+which is also `STRIP_FETCH_WINDOW`, so the arrangement above inverts:
+
+- **The view and the strip share one request again.** At the default both
+  fetches build the same url + cacheKey and `fetchSharedJson` collapses them;
+  `PlayerRouteView`'s prefetch warms that same key. The second, per-window
+  aggregation is now paid only when a stored pick or a pill click narrows the
+  view. Against the 6-deep request queue that is the +1 given back.
+- **The 30d-empty fallback effect is retired, not disabled.** There is no span
+  wider than the default to promote to, so the effect was deleted along with
+  its tests; the lapsed-player case it served (battles 31-90 days back) is now
+  what the default alone delivers, and is pinned by the `90d default for a
+  lapsed player` block in `BattleHistoryCard.test.tsx`.
+- **Both ordering traps still hold, for a narrower reason.** Availability is
+  still judged on the strip payload and the standalone collapse is still gated
+  on `stripLoaded`: a reader whose stored pick is Week or Month lands on that
+  narrow payload, and judging on it would dark out the Activity tab for a
+  player the 90d strip can still show. The default no longer puts anyone on
+  that path by itself.
+- **A stored `ninety` now reads as "at the default"** (`userPickedWindow` is
+  false), and a stored `month` reads as an explicit pick. Nothing migrates;
+  `isStickyWindow` is unchanged.
+- **`onWindowChange` has two movers, not three**: the stored-pick restore and a
+  pill click. The sibling ships-played chart follows the 90d default on a
+  clean mount.
 
 ## BattleHistoryCard — the strip crosshair and its readout (2026-08-19, v5.4.2)
 
@@ -385,10 +419,11 @@ implementation falls into.
    draws before its own data exists.
 4. **The window is published from the card's STATE, gated on the restored
    scope.** `BattleHistoryCard` gained `onWindowChange`, fired from an effect on
-   `window`, not from the pill's `onClick`. Three paths move that state — the
-   stored-pick restore, the automatic 75d fallback, and a pill click — and a
-   host wired only to the click leaves a reader whose sticky pick is 60d looking
-   at a 30d chart. The publish carries the same `windowPrefScope !== prefScope`
+   `window`, not from the pill's `onClick`. Three paths moved that state — the
+   stored-pick restore, the automatic 75d fallback (retired 2026-10-16 with the
+   90d default; two paths remain), and a pill click — and a host wired only to
+   the click leaves a reader whose sticky pick differs from the default looking
+   at the wrong chart. The publish carries the same `windowPrefScope !== prefScope`
    gate the main fetch does, because the initial state is the *default* window:
    ungated, it announces `month` on mount and corrects to the stored pick a tick
    later, which a per-window host renders as a visible flash of the wrong span.
@@ -547,8 +582,9 @@ drops the moment the player is displaced), fed by `ship_badges`
   card's wrapper, not the panel. Putting it back on the panel squeezes or clips
   the ships-played chart below.
 - Adding a surface that follows the window pill: subscribe to
-  `onWindowChange`, never to the pill's `onClick` — the stored pick and the 75d
-  fallback both move the window without one.
+  `onWindowChange`, never to the pill's `onClick` — the stored-pick restore
+  moves the window without one (as did the extended-window fallback until the
+  90d default retired it, 2026-10-16).
 - Touching badge order: there are two dispatch sites, not one.
 - Touching the roster split: `is_clan_battle_player` must keep overriding the
   idle rule, or current-season shield wearers fall below the fold.

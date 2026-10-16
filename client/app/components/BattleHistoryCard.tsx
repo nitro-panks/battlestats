@@ -131,21 +131,20 @@ export const BATTLE_HISTORY_FETCH_TTL_MS = 60_000;
 // dedup the prefetch exists to get. Also the strip's fixed domain (see
 // STRIP_DOMAIN_DAYS).
 //
-// The card OPENS on Month (30 days). `ninety` is one pill click away and is
-// also the automatic fallback for a player with nothing in the last 30 days
-// — see the fallback effect in the component. Note this is no longer the
-// window the strip fetches: the strip always pulls STRIP_FETCH_WINDOW (90d)
-// so the 90d pill has its data ready to animate into and the fallback has
-// something to decide on. That costs a second request per card — month for
-// the view, ninety for the strip — which cannot be collapsed, because
-// totals and by_ship are aggregated server-side per window and a 30d view is
-// not derivable from a 90d payload.
-export const DEFAULT_BATTLE_HISTORY_WINDOW = 'month';
+// The card OPENS on 90d (2026-10-16; it opened on Month from the card's
+// introduction until then). 90d is the widest pill, so the default view and
+// the strip's fixed backdrop are the SAME request: at the default the two
+// fetches below share a url + cacheKey and fetchSharedJson collapses them.
+// The narrower pills are one click away. The Month-era 30d-empty fallback,
+// which promoted a lapsed player to 90d once the strip landed, is retired:
+// the card already opens on the widest span there is, so a player with
+// nothing in 90 days has nothing wider to be promoted to.
+export const DEFAULT_BATTLE_HISTORY_WINDOW = 'ninety';
 
-// The window the trend strip always fetches, independent of the pill. Wider
-// than the default view on purpose: the strip is the backdrop the 90d pill
-// animates out to, and the emptiness of the trailing 30 days (which decides
-// the fallback) is read off it.
+// The window the trend strip always fetches, independent of the pill. It is
+// the full backdrop every narrower pill reads its emptiness off and animates
+// against; it only differs from the main fetch once the reader (or a stored
+// pick) narrows the view.
 export const STRIP_FETCH_WINDOW = 'ninety';
 
 export const battleHistoryFetchUrl = (
@@ -197,7 +196,7 @@ export const prefetchBattleHistory = (playerName: string, realm: string, signal?
 // It used to be a probe over all dates, making its width the rollup retention
 // (BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS; prod=105, pinned in
 // server/deploy/deploy_to_droplet.sh) while the pills, the strip and the
-// 30d->90d fallback were all judged on the window — so a player whose last ranked
+// (since-retired) 30d->90d fallback were all judged on the window — so a player whose last ranked
 // battles were 66 days ago lit the
 // Ranked tab onto an activity view with nothing to draw (2026-08-24,
 // `briansayshello` NA). If that probe is ever widened again, this breaks.
@@ -265,10 +264,9 @@ interface BattleHistoryCardProps {
     onSparklineAnimationEnd?: () => void;
     // Reports the window this card is currently scoped to, so a sibling surface
     // can re-scope with the pill. Unlike onAvailabilityChange this fires EVERY
-    // time the window moves, and covers all three ways it can: the stored-pick
-    // restore, the automatic 90d fallback, and a pill click. A host that wires
-    // only the click would leave a reader whose sticky pick is 90d looking at a
-    // 30d sibling.
+    // time the window moves, and covers both ways it can: the stored-pick
+    // restore and a pill click. A host that wires only the click would leave a
+    // reader whose sticky pick is Month looking at a 90d sibling.
     onWindowChange?: (window: BattleHistoryWindow) => void;
     // Optional node rendered in the header immediately to the LEFT of the mode
     // caption ("Ranked" / "Random Battles"), sized to sit inline beside it. The
@@ -1071,8 +1069,8 @@ type Period = 'daily' | 'weekly' | 'monthly' | 'yearly';
 // The backend still ACCEPTS fortyfive/sixty/seventyfive for bookmarked and
 // shared URLs — they are simply unreachable from the UI, exactly like `year`,
 // and so are absent from this union. A stale localStorage pref naming one
-// fails `isStickyWindow` and falls back to Month, which is the wanted
-// behaviour: no migration, no reader stranded on a pill that is not there.
+// fails `isStickyWindow` and falls back to the default (90d), which is the
+// wanted behaviour: no migration, no reader stranded on a pill that is not there.
 // Retention is 105d and capture reaches back 98 days (2026-06-13), so 90d is
 // real depth rather than a labelled short window.
 // `year` is intentionally excluded from VISIBLE_WINDOWS — capture started
@@ -1266,19 +1264,19 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         // A restored pick counts as explicit ONLY when it differs from the
         // default. At the default the reader is where an untouched card would
         // have put them, so the standalone no-battles collapse below must still
-        // apply — otherwise remembering "90d" would make empty cards appear for
-        // players who previously had none.
+        // apply — otherwise a stored pick naming the default itself would make
+        // empty cards appear for players who previously had none.
         setUserPickedWindow(stored !== null && stored !== DEFAULT_BATTLE_HISTORY_WINDOW);
         setWindowPrefScope(prefScope);
     }, [prefScope]);
     // Publish the live window to any host that asked for it. Driven off the
-    // state rather than the pill handler on purpose: the restore above and the
-    // 90d fallback below both move `window` without a click, and a host that
-    // missed those would be scoped to a window the reader is not looking at.
+    // state rather than the pill handler on purpose: the restore above moves
+    // `window` without a click, and a host that missed it would be scoped to a
+    // window the reader is not looking at.
     //
     // Gated on the restored scope for the same reason the main fetch is: the
     // initial state is the DEFAULT window, so an ungated publish would announce
-    // `month` on mount and correct itself to the stored pick a tick later —
+    // `ninety` on mount and correct itself to the stored pick a tick later —
     // and a host that fetches per window would visibly render the wrong span
     // first. The restore batches setWindow with setWindowPrefScope, so the
     // first publish this gate allows already carries the remembered pick.
@@ -1374,7 +1372,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         prefScope, windowPrefScope]);
 
     // Reset the loaded gate whenever the entity/mode identity changes, so the
-    // month fetch below re-establishes it rather than the empty-pill disable
+    // strip fetch below re-establishes it rather than the empty-pill disable
     // acting on the previous player's data (a refresh-poll re-fetch keeps it).
     useEffect(() => {
         setStripLoaded(false);
@@ -1385,8 +1383,9 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     // Separate fetch backing the trend strip, independent of the window driving
     // the bars/table. It ALWAYS pulls the full STRIP_DOMAIN_DAYS window: the
     // strip's domain is fixed, so this never re-fires on a pill click. At the
-    // default window it is the same url + cacheKey as the main fetch, so
-    // fetchSharedJson collapses the two into one request.
+    // default window (90d) it is the same url + cacheKey as the main fetch, so
+    // fetchSharedJson collapses the two into one request; only a narrowed view
+    // (stored pick or pill click) costs a second, per-window aggregation.
     useEffect(() => {
         // Gated on the same pref resolution as the main fetch above purely to
         // preserve their ORDER: the window the reader is waiting on must be
@@ -1426,34 +1425,6 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     }, [playerName, realm, mode, refreshNonce, requestSignal,
         prefScope, windowPrefScope]);
 
-    // Fallback to 90d for a player with nothing in the last 30 days. The card
-    // opens on Month; if that span is empty but the wider one is not, showing an
-    // empty Month is strictly worse than showing the battles that exist — so the
-    // strip's own data promotes the view once it lands. The other pills then dim
-    // themselves through the usual empty-window rule.
-    //
-    // This is a DERIVATION, not a pick, and the distinction is the whole reason
-    // it does not call writeWindowPref: persisting it would pin a returning
-    // player to 90d forever, long after they start playing again and Month is
-    // the better view. It also defers to a real stored pick and to any pill the
-    // reader has touched this session.
-    useEffect(() => {
-        if (!stripLoaded) return;
-        if (windowPrefScope !== prefScope) return;
-        if (userPickedWindow || readWindowPref(prefScope) !== null) return;
-        if (window !== DEFAULT_BATTLE_HISTORY_WINDOW) return;
-        const trailing = (n: number): number =>
-            buildWindowedDays(stripByDay, n).reduce((sum, d) => sum + (d.battles || 0), 0);
-        if (trailing(WINDOW_SPAN_DAYS[DEFAULT_BATTLE_HISTORY_WINDOW]) === 0
-            && trailing(STRIP_DOMAIN_DAYS) > 0) {
-            setWindow('ninety');
-        }
-        // `window` is deliberately absent from the deps: this runs on the strip
-        // landing, and re-running it when the window changes would fight a
-        // reader who clicks back to an empty Month on purpose.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [stripLoaded, stripByDay, prefScope, windowPrefScope, userPickedWindow]);
-
     // Availability is a one-shot, stable signal: report it from the FIRST
     // resolved payload (or error) per (player, realm), then latch. Basing it on
     // the live `window` would let a user toggling to an empty window flip
@@ -1471,20 +1442,21 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             return;
         }
         // Judge on the WIDEST span the card can show — the strip's 90 days —
-        // not on whichever window is selected. The card opens on Month, so a
-        // player whose last battles were 45 days ago has an empty month payload;
-        // reading availability off that told the parent "no activity" and got
-        // the Activity tab disabled before the 30d-empty fallback could promote
-        // them to 90d. That is precisely the population the fallback exists for.
+        // not on whichever window is selected. A reader whose stored pick is
+        // Week or Month lands on that narrower payload; reading availability
+        // off it would tell the parent "no activity" for a player whose
+        // battles sit further back, and dark out the Activity tab for exactly
+        // the population the 90d strip can still show. (Before 2026-10-16 the
+        // card itself opened on Month, which made this the default path.)
         // Falls back to the main payload only if the strip never arrives.
-        // That fallback is one window NARROWER (Month, so `available_modes`
-        // covers 30 days rather than 90): on a failed strip fetch a ranked
-        // player whose rows sit in the 30-90 day band reports false and the
-        // parent opens the Ranked tab on its History sub-view instead of
-        // Activity. Accepted — History is populated for exactly that player,
-        // the ranked TAB itself gates on `hasKnownRankedGames` rather than on
-        // this signal, and it self-corrects on the next load. The random path
-        // is untouched: it never consults `available_modes`.
+        // That fallback can be NARROWER (a stored Month pick, so
+        // `available_modes` covers 30 days rather than 90): on a failed strip
+        // fetch a ranked player whose rows sit in the 30-90 day band reports
+        // false and the parent opens the Ranked tab on its History sub-view
+        // instead of Activity. Accepted — History is populated for exactly
+        // that player, the ranked TAB itself gates on `hasKnownRankedGames`
+        // rather than on this signal, and it self-corrects on the next load.
+        // The random path is untouched: it never consults `available_modes`.
         if (!stripSettled) return;
         const judged = stripPayload ?? payload;
         if (!judged) return;
@@ -1603,18 +1575,18 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     const hasBattles = !!(totals && typeof totals.battles === 'number'
         && totals.battles > 0);
     // Standalone: hide the card when the user is at the implicit default
-    // (window=month — matching the always-month sparkline) AND there's no
+    // (window=ninety — matching the always-90d sparkline) AND there's no
     // data — the card never appears for players with no battles in the default
-    // 30d window. An explicit window pick keeps the card visible so the pill
+    // 90d window. An explicit window pick keeps the card visible so the pill
     // row stays reachable.
     // Embedded: never collapse to null here — the hosting tab is already active,
     // so render the chrome (sparkline/header/pills/"no battles") instead. The
     // parent dark-outs the tab and switches away when availability is false.
-    // `stripLoaded` is load-bearing here, not defensive: the fallback below
-    // switches a 30d-empty player to 90d only once the strip resolves. Without
-    // the gate the card collapses to null on the empty month payload first and
-    // then reappears when the fallback lands — a visible flash for exactly the
-    // population the fallback exists to serve.
+    // `stripLoaded` keeps the collapse decision on the strip's own payload,
+    // which at the default is the very same request as the main fetch; it
+    // used to also hold the card open until the Month-era 30d-empty fallback
+    // had decided, and is kept so the gate reads the same whichever window a
+    // stored pick lands the reader on.
     if (!embedded && stripLoaded && (
         !hasBattles
         && window === DEFAULT_BATTLE_HISTORY_WINDOW && !userPickedWindow

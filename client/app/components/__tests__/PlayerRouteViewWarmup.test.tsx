@@ -178,10 +178,10 @@ describe('PlayerRouteView tab warmup smoke', () => {
         // Battle-history is prefetched in PARALLEL — fired before the player
         // payload resolves, not serially after PlayerDetail mounts the card.
         expect(mockFetchSharedJson).toHaveBeenCalledWith(
-            '/api/player/Player%20One/battle-history/?window=month&mode=random&realm=na',
+            '/api/player/Player%20One/battle-history/?window=ninety&mode=random&realm=na',
             expect.objectContaining({
                 ttlMs: 60000,
-                cacheKey: 'battle-history:Player One:na:month:random:0:0',
+                cacheKey: 'battle-history:Player One:na:ninety:random:0:0',
             }),
         );
 
