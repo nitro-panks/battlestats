@@ -149,6 +149,7 @@ def healthy_recapture(realm, ts, advanced=740, clanless=96):
         "scanned": 30000,
         "wg_calls": 300,
         "chunk_errors": 0,
+        "chunk_error_players": 0,
         "no_data": 9,
         "hidden": 1,
         "still_dormant": 30000 - advanced - 1 - 9,
@@ -380,6 +381,36 @@ class TrippedConditionTests(OpsAlertTestCase):
     def test_recapture_component_mismatch_sends(self):
         """Counts that do not add up mean the snapshot is not describing itself."""
         self.rewrite_recapture("na", still_dormant=12)
+        self.assert_fires("recapture_component_mismatch:na")
+
+    def test_recapture_failed_chunk_rows_reconcile_the_tally(self):
+        """2026-10-16, eu: 5 of 300 chunks got a WG 504. Those 500 rows are in
+        `scanned` but in no outcome bucket, and the tally fired a SECOND
+        condition for the same blip. With the rows recorded, chunk_errors
+        reports once and the tally stays quiet."""
+        self.rewrite_recapture("eu", chunk_errors=5, chunk_error_players=500,
+                               advanced=740, still_dormant=30000 - 740 - 1 - 9 - 500,
+                               cursor_stamped=29500)
+        codes = self.assert_fires("recapture_chunk_errors:eu")
+        self.assertNotIn("recapture_component_mismatch:eu", codes)
+
+    def test_recapture_failed_chunk_rows_still_checked(self):
+        """The fifth component is part of the sum, not a licence to skip it."""
+        self.rewrite_recapture("eu", chunk_errors=5, chunk_error_players=500,
+                               still_dormant=12)
+        self.assert_fires("recapture_component_mismatch:eu")
+
+    def test_recapture_legacy_snapshot_with_chunk_errors_reports_once(self):
+        """A pre-field snapshot cannot reconcile its own tally when a chunk
+        failed; chunk_errors already names the cause, so the mismatch is
+        not reported as a second condition."""
+        self.rewrite_recapture("eu", chunk_errors=5, chunk_error_players=doe_DELETE,
+                               advanced=740, still_dormant=30000 - 740 - 1 - 9 - 500)
+        codes = self.assert_fires("recapture_chunk_errors:eu")
+        self.assertNotIn("recapture_component_mismatch:eu", codes)
+
+    def test_recapture_legacy_snapshot_without_chunk_errors_still_checks_tally(self):
+        self.rewrite_recapture("na", chunk_error_players=doe_DELETE, still_dormant=12)
         self.assert_fires("recapture_component_mismatch:na")
 
     def test_recapture_cursor_not_advancing_sends(self):

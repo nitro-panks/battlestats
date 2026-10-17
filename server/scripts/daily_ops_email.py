@@ -239,7 +239,8 @@ def gather_crawl_yield(bench_dir: str, now: datetime | None = None) -> dict:
 
 RECAP_FIELDS = (
     "mode", "band_days", "limit", "candidates", "scanned", "wg_calls", "no_data",
-    "hidden", "chunk_errors", "still_dormant", "advanced", "yield_frac", "into7d",
+    "hidden", "chunk_errors", "chunk_error_players", "still_dormant", "advanced",
+    "yield_frac", "into7d",
     "into7d_clanned", "into7d_clanless", "still_lapsed", "still_lapsed_clanless",
     "cursor_stamped",
 )
@@ -909,11 +910,21 @@ def _evaluate_recapture(recap: dict) -> list[dict]:
                     out.append(_cond(f"recapture_cursor_stalled:{r}",
                                      f"{r}: cursor_stamped={stamped} in apply mode; the LRU rotation "
                                      f"cursor is not advancing, so the pool will never be walked"))
+            # Rows inside a failed WG chunk are in `scanned` (the call returned)
+            # but in no outcome bucket, so they are a legitimate fifth
+            # component. Snapshots written before 2026-10-16 lack the field; on
+            # those, a non-zero chunk_errors already names the cause and the
+            # tally cannot be reconciled, so it is not reported a second time.
             parts = [num("still_dormant"), num("advanced"), num("hidden"), num("no_data")]
-            if all(p is not None for p in parts) and sum(parts) != scanned:
-                out.append(_cond(f"recapture_component_mismatch:{r}",
-                                 f"{r}: still_dormant+advanced+hidden+no_data={sum(parts)} != "
-                                 f"scanned={scanned}"))
+            errored = num("chunk_error_players")
+            if all(p is not None for p in parts) and (errored is not None or not errs):
+                total = sum(parts) + (errored or 0)
+                if total != scanned:
+                    label = "still_dormant+advanced+hidden+no_data"
+                    if errored is not None:
+                        label += "+chunk_error_players"
+                    out.append(_cond(f"recapture_component_mismatch:{r}",
+                                     f"{r}: {label}={total} != scanned={scanned}"))
             adv = num("advanced")
             if adv is not None and adv < thr("recapture_advanced_min"):
                 out.append(_cond(f"recapture_no_returners:{r}",

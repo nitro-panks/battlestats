@@ -256,7 +256,18 @@ pass so it can only mean total collapse of the crawl's floor-impossible value.
 | `cursor_stamped` | 30,000 on all 113 | `<= 0` in apply mode alerts | tuned (shape) |
 | `advanced` | 33 .. 2,297 (33 was an off-cycle 3rd-of-day na run) | `< 10` | backstop |
 | component sum vs `scanned` | exact on every inspected run | mismatch alerts | tuned (shape) |
+| `chunk_error_players` | field added 2026-10-16 (v5.12.1); 0 unless a chunk failed | **none**; it is the fifth term of the component sum | see below |
 | `into7d`, `into7d_clanless`, `into7d_clanned`, `still_lapsed`, `still_lapsed_clanless`, `still_dormant`, `yield_frac`, `band_days`, `limit`, `candidates`, `hidden` | `into7d_clanless` as low as **2**; `hidden` 0 .. 18; `yield_frac` 0.0011 .. 0.0766 | **none** | see below |
+
+**The component sum has five terms since 2026-10-16**: `still_dormant + advanced +
+hidden + no_data + chunk_error_players == scanned`. Rows inside a chunk WG
+answered with an error are counted in `scanned` (the call returned) but land
+in no outcome bucket and keep a NULL cursor, so before the field existed one
+WG 504 blip produced two conditions: `recapture_chunk_errors:eu` (5 of 300
+chunks) **and** `recapture_component_mismatch:eu` (29,500 != 30,000). On a
+snapshot that predates the field, a non-zero `chunk_errors` already names the
+cause and the tally cannot be reconciled, so the mismatch is not reported a
+second time; with `chunk_errors=0` the four-term check still runs.
 
 No threshold on the yield-quality fields. The `/recapture` skill is explicit that
 a healthy dormant pool is mostly `still_dormant`, so a low single-digit percent

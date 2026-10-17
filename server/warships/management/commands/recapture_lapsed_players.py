@@ -183,6 +183,7 @@ class Command(BaseCommand):
 
         # Counters
         wg_calls = chunk_errors = no_data = hidden = still_dormant = 0
+        chunk_error_players = 0  # rows inside failed chunks: in `scanned`, in no bucket
         into7d_clanned = into7d_clanless = 0
         lapsed_clanned = lapsed_clanless = 0
         promote = []       # flush buffer: returners awaiting bulk_update
@@ -280,6 +281,7 @@ class Command(BaseCommand):
                     # Transient batch failure: leave the cursor untouched so these
                     # rows are retried next run rather than rotated past unchecked.
                     chunk_errors += 1
+                    chunk_error_players += len(chunk)
                     self.stderr.write(
                         f"recapture_lapsed_players: batch failed realm={realm} err={err}")
                     if note_chunk_failure(f"last err={err}"):
@@ -432,6 +434,13 @@ class Command(BaseCommand):
             "scanned": scanned,
             "wg_calls": wg_calls,
             "chunk_errors": chunk_errors,
+            # Rows that sat in a failed chunk. They are counted in `scanned`
+            # (the call returned) but land in no outcome bucket and keep a
+            # NULL cursor, so without this field the ops email's component
+            # tally (still_dormant+advanced+hidden+no_data == scanned) reads a
+            # single WG 504 blip as a second, unrelated condition (2026-10-16, eu:
+            # chunk_errors=5 AND component_mismatch 29500 != 30000).
+            "chunk_error_players": chunk_error_players,
             "no_data": no_data,
             "hidden": hidden,
             "still_dormant": still_dormant,
@@ -479,7 +488,7 @@ class Command(BaseCommand):
                 "incremental flushes are durable; those rows keep a NULL cursor "
                 "and retry next run. ***")
         out(f"  scanned={scanned}  WG_calls={wg_calls}  chunk_errors={chunk_errors}  "
-            f"no_data={no_data}  hidden={hidden}")
+            f"(rows in failed chunks={chunk_error_players})  no_data={no_data}  hidden={hidden}")
         out(f"  still_dormant={still_dormant}  advanced(returned)={advanced}  "
             f"yield={rate:.2f}% of scanned")
         out(f"  -> reactivated INTO active_7d (floor harvests free): {into7d}  "
