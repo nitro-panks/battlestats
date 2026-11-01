@@ -228,6 +228,31 @@ The admin remains the one §6 item still unexercised; it is little used here.
   the 782 client tests and the build pass, and `/` is still prerendered static.
   As in September, the red audit step ran before lint, test and build, so no
   client check ran in CI for those four pushes.
+- **2026-11-01: `next` 16.3.8 → 16.4.3.** The gate went red on the first push
+  since 2026-10-17 (the deletion-batch docs commit): three advisories against
+  16.0.0-16.4.0, all fixed in 16.4.1. GHSA-2464-fhr4-w9xw (critical,
+  unauthenticated RCE in Image Optimization when SVG files are used) applies to
+  us: `next.config.mjs` still has no `images` block, so `/_next/image` is live on
+  prod. GHSA-673q-mjm6-r5xr (critical, RCE in `use cache` functions returning
+  typed arrays) and GHSA-p3m5-59mp-jv5r (high, DoS in App Router Server Actions)
+  do not: the client has no `"use cache"` and no `"use server"` directive.
+  Versions crossed: 16.4.0 (a feature minor: React canary upgrades, the static
+  generation stream option renamed `waitForAllReady`, prefetch and
+  back-before-hydration fixes, `proxy.ts` detection with compound
+  `pageExtensions`); 16.4.1 (the three fixes alone); 16.4.2 (Turbopack and
+  turbo-tasks backports); 16.4.3 (bug-fix backports: extensionless Google font
+  URLs, no app-page runtime in `proxy.ts`, OpenTelemetry request traces kept
+  together). No config or API change was needed; lint, the 787 client tests and
+  the build pass, prod-only audits to zero, and `/` is still prerendered static.
+  **`eslint-config-next` deliberately stays at 16.3.8.** 16.4.3 pulls
+  `eslint-plugin-react-hooks` 7.1.1, whose improved ref validation and
+  report-all-errors mode turn up 24 lint errors: 17 "Cannot access refs during
+  render" in `PlayerRouteView.tsx` (the documented Strict Mode controller guard
+  at the top of the component) and 7 in `RandomsSVG.tsx` (6 "This value cannot
+  be modified" on `activeFilterRef.current = null` inside event handlers, one
+  `Date.now()` purity finding). Its peers are eslint and typescript only, so the
+  skew is harmless; the findings are a separate work item, not a CI remedy.
+  As before, the red audit step ran before lint, test and build.
 - **2026-10-04: backend security patch set, four pins.** From the Dependabot
   alert list (the repo has no `.github/dependabot.yml`, so alerts arrive but
   upgrade PRs do not):
