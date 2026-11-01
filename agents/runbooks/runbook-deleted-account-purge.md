@@ -1,8 +1,8 @@
 # Runbook: Deleted Account Purge (GDPR / WG Account Deletion Request)
 
 **Created**: 2026-03-30
-**Last executed**: 2026-10-06 (seventh batch — see "Execution Results" section)
-**Status**: Recurring — tooling deployed v1.2.13; executed 2026-03-30 (11,839 IDs / 0 found), 2026-04-30 (9,723 IDs / 14 found), 2026-05-30 (9,729 IDs / 79 found), 2026-07-01 (9,822 IDs / 85 found), 2026-07-30 (9,238 IDs / 129 found), 2026-08-31 (12,817 IDs / 136 found), and 2026-10-06 (10,533 IDs / 158 found), responses sent to Wargaming after each batch. Expect future batches at irregular cadence.
+**Last executed**: 2026-11-01 (eighth batch — see "Execution Results" section)
+**Status**: Recurring — tooling deployed v1.2.13; executed 2026-03-30 (11,839 IDs / 0 found), 2026-04-30 (9,723 IDs / 14 found), 2026-05-30 (9,729 IDs / 79 found), 2026-07-01 (9,822 IDs / 85 found), 2026-07-30 (9,238 IDs / 129 found), 2026-08-31 (12,817 IDs / 136 found), 2026-10-06 (10,533 IDs / 158 found), and 2026-11-01 (10,270 IDs / 125 found), responses sent to Wargaming after each batch. Expect future batches at irregular cadence.
 
 ## Context
 
@@ -544,6 +544,66 @@ Live run matched the dry run exactly on `found_in_db` and every row count (the d
 ### New lesson
 
 **`/tmp` on the droplet is not an archive.** Every prior transcript (`/tmp/purge_transcript_*.jsonl`, 2026-03-30 through 2026-08-31) was gone on 2026-10-06; `/tmp` is cleared on reboot and the apt auto-restarts reboot the box. The transcripts are the evidence behind "available upon request" in six sent responses. From this batch on, write transcripts to `/opt/battlestats-server/shared/purge/`, which survives deploys and reboots. Step 5 of the playbook is updated accordingly.
+
+## Execution Results (2026-11-01)
+
+Source: WG data-protection email received 2026-11-01 00:31 UTC (Gmail message `1a19484e405de8d1`, subject "Wargaming.net Data Deletion Request", from `noreply@wargaming.net`). Same envelope and body text as prior batches. Processed 2026-11-01, the day of receipt. The CSV contained 10,271 lines, i.e. 10,270 account IDs plus the header; all unique.
+
+**Retrieval**: `gmail_export_messages` mbox export of the single message, then `mailbox` + MIME walk for the part named `deleted_accounts.zip`. Landed at `deleted/deleted_accounts_20261101.zip`. The prior batch's zip (`deleted_accounts_20261001.zip`) was still on disk; the 2026-10-06 reply was confirmed in Sent, so it was removed first.
+
+**Schema re-verification**: `Player._meta.get_fields()` reverse relations are still exactly the same 8 (Snapshot, PlayerExplorerSummary, HotPlayer, PlayerAchievementStat, BattleObservation, BattleEvent, PlayerDailyShipStats, ShipTopPlayerSnapshot), all `CASCADE`. Bare integer references: `Clan.leader_id` (nulled by the command) and `DeletedAccount.account_id` (the blocklist itself). No drift since 2026-10-06. Note: on a reverse relation the hook is `f.on_delete`, not `f.remote_field.on_delete`; the latter raises `AttributeError`.
+
+**Pre-flight (read-only)**: `purge_deleted_accounts --dry-run` against the cloud DB (sub-shell env from `.env.cloud` + `.env.secrets.cloud`; `DB_HOST` echoed as the managed-PG host). Predicted 125/10,270 found, 10,270 to blocklist.
+
+Match distribution: 72 EU, 28 ASIA, 25 NA. 16 of 125 were clan members; 1 clan had a matched ID as `leader_id` (nulled). Battle volume: 84 had <250 lifetime PvP battles, 16 had 250-999, 25 had >=1,000. Last-battle dates spanned 2017-12-28 to **2026-10-13** (2 null); the most recent was active 19 days before the purge, inside the 105-day battle-history retention window. `PlayerAchievementStat` holds 0 rows in production, so `total_achievement_rows` is 0 by construction.
+
+**Execution** (on the droplet, under the CLAUDE.md autonomy grant):
+```bash
+scp deleted/deleted_accounts_20261101.zip root@battlestats.online:/tmp/deleted_accounts.zip
+ssh root@battlestats.online '/opt/battlestats-server/venv/bin/python /opt/battlestats-server/current/server/manage.py purge_deleted_accounts /tmp/deleted_accounts.zip --transcript /opt/battlestats-server/shared/purge/purge_transcript_20261101.jsonl'
+```
+
+```json
+{
+  "total_ids": 10270,
+  "found_in_db": 125,
+  "not_found": 10145,
+  "total_player_rows": 125,
+  "total_snapshot_rows": 728,
+  "total_achievement_rows": 0,
+  "total_explorer_rows": 103,
+  "total_visit_event_rows": 0,
+  "total_visit_daily_rows": 0,
+  "total_cache_keys_deleted": 0,
+  "total_clan_leaders_nulled": 1,
+  "blocked": 10270
+}
+```
+
+Live run matched the dry run exactly on `found_in_db` and every row count (the dry run's 1,000 cache keys is the 125 x 8 template estimate; 0 live keys existed). First batch to come in below the prior one: 0 → 14 → 79 → 85 → 129 → 136 → 158 → **125**.
+
+**Post-purge verification**:
+```json
+{
+  "ids": 10270,
+  "players_remaining": 0,
+  "blocklisted_for_batch": 10270,
+  "blocklist_total": 83971,
+  "visit_events_remaining": 0,
+  "visit_daily_remaining": 0,
+  "clan_leaders_remaining": 0,
+  "battle_observations_remaining": 0,
+  "battle_events_remaining": 0,
+  "daily_ship_stats_remaining": 0,
+  "ship_top_player_snapshots_remaining": 0
+}
+```
+
+Blocklist total 83,971 = 73,701 (after 2026-10-06) + 10,270: no ID in this batch had been blocklisted before.
+
+**Transcript**: `/opt/battlestats-server/shared/purge/purge_transcript_20261101.jsonl` on the droplet (10,271 lines), alongside the 2026-10-01 transcript. The staged zip was removed from `/tmp` afterwards.
+
+**Response**: Gmail draft created via mailcap (`gmail_create_draft`, threaded to the request, addressed to `noreply@wargaming.net`). Source email marked read and archived.
 
 ---
 
