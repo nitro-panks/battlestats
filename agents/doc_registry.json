@@ -4774,6 +4774,36 @@
                 "background-queue-split-shipped",
                 "realm-axis-rule-replaced"
             ]
+        },
+        "agents/runbooks/runbook-contribution-rating-design-2026-11-01.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "active-spec",
+            "section": "feature",
+            "owner": "backend",
+            "aliases": [
+                "contribution rating",
+                "personal rating",
+                "pr rating",
+                "battlestats-native pr",
+                "player rating design",
+                "why not wows-numbers pr"
+            ],
+            "tags": [
+                "rating",
+                "personal-rating",
+                "contribution",
+                "player-page",
+                "battle-history",
+                "regression",
+                "percentile",
+                "design",
+                "spike"
+            ],
+            "archive_on": [
+                "contribution-rating-shipped",
+                "contribution-rating-abandoned"
+            ]
         }
     }
 }
