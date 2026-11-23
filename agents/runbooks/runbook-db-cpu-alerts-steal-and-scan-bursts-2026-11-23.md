@@ -4,7 +4,7 @@ _Created: 2026-11-23_
 _Lifecycle: dated-active · Owner: platform_
 _Context: DigitalOcean's "CPU is running high" alert fired on the managed Postgres on 2026-11-22 13:11 UTC and 2026-11-23 10:41 UTC (98.9% against a 90% / 5 minute policy). The operator described it as a recurring pattern and asked for the root cause._
 _QA: every figure below was measured on 2026-11-23 between 21:45 and 21:58 UTC, from `pg_stat_statements`, the droplet journal, the DO API, or the `:9273` metrics endpoint. Nothing here is inferred from a dashboard._
-_Status 2026-11-23: **diagnosis PROVISIONAL (one sampled cycle); no code or configuration change shipped.** A read-only sampler is armed until about 2026-11-24 23:50 UTC. Operator decision recorded the same day: the hot-player score list should be computed once a day. **Resume at "Next steps", step 1.**_
+_Status 2026-11-23 23:30 UTC: **step 4 shipped as v5.13.3 and verified; the alerts are NOT yet resolved.** Three alerts are now explained and each had a different workload mix (F3, F6), so the cause is low headroom under any two or three concurrent heavy scans, not one statement. A read-only sampler is armed until about 2026-11-24 23:50 UTC. **Resume at "Next steps", step 2, then decide step 8.**_
 
 ## QA Notes
 
@@ -94,6 +94,26 @@ No single runaway statement appears in either window. Long tasks overlapping eac
 
 By total leader time since the reset: the observation floor's bulk player fetch with its `_last_obs_battles` subquery (15,354 s over 22,653 calls), the `warm_realm_ships_pct` battle-event aggregate (11,328 s, mean 52 s), the snapshot candidate scan whose `LIMIT` grows with the day's checked set (10,108 s, mean 15.9 s), and the incremental ranked candidate scans (5,125 s combined, mean 39 to 80 s, max 220 s).
 
+### F6. A backend deploy fires the alert by itself (captured live, 2026-11-23 23:01 to 23:09)
+
+The v5.13.3 backend deploy restarted gunicorn at 22:58. Its `when_ready` hook dispatched `startup_warm_caches_task`, which fans out to all three realms at once, outside the striping. The sampler recorded `idle=0` for seven consecutive minutes (23:02 to 23:08, `load1` up to 6.35), and DigitalOcean mailed "Triggered" at 23:11 and "Recovered" at 23:15.
+
+Active statements during the saturation, by sample count:
+
+| Samples | Statement | Source |
+|---|---|---|
+| 93 | `FETCH FORWARD 2000` on a server-side cursor, mostly waiting on IO | three concurrent `warm_player_ranked_wr_battles_correlation_task` runs (239 s, 351 s, 381 s) |
+| 25 | `REFRESH MATERIALIZED VIEW CONCURRENTLY mv_player_distribution_stats` | `warm_player_distributions_task` x3 (47 s, 81 s, 139 s) |
+| 12 | observation-floor candidate scan with parallel workers | `ensure_daily_battle_observations_task` |
+
+Steal was only 4 to 12% in this window (`user` 45 to 49, `sys` 31 to 36): this saturation was real work, not withheld CPU. F1's one-third steal figure is therefore not constant, and steal alone does not explain the alerts.
+
+**The alert mail lags the saturation.** "Triggered" arrived about 3 minutes after the saturated window ended. The two original alerts therefore correspond to roughly 13:01 to 13:08 on 11-22 and 10:31 to 10:38 on 11-23, earlier than F3 assumed. The 11-23 window then coincides with the asia nightly ship-standings pipeline starting at 10:30 (`snapshot_ship_top_players_task`, `warm_all_ship_pop_avg_damage_task`, two `warm_top_ships_treemap_task`, `warm_realm_ships_pct_task`), the eu recapture sweep at 10:30, two floor passes, and the weekly traffic digest at 10:31. Neither original alert followed a service restart; the only restart in the period was the droplet reboot at 00:33 on 11-23.
+
+### Verification of step 4 (v5.13.3)
+
+Across the 23:07 and 23:17 warm cycles the score-ranking statement stayed at 644 calls and the recent-lookups statement at 644 calls; both had been rising by one per cycle. `warm_hot_entity_caches_task` took 3.7 s at 23:17 against 25 to 82 s earlier in the day. Full backend suite: 1393 passed, 2 skipped.
+
 ## What is not established
 
 - Whether steal rose after the 2026-11-19 node move. No pre-move sample exists.
@@ -127,6 +147,7 @@ One at a time. Steps 5 onward are production levers and each needs the operator'
    ```bash
    ssh root@battlestats.online 'awk "\$2>=\"10:36:00\" && \$2<=\"10:46:00\"" /tmp/dbcpu_sampler.log'
    ```
+   Done once on 2026-11-23 (F6). Per F6 the mail lags by about 3 minutes, so read from 10 minutes before the trigger time, not 5.
    Record the steal share and the statements present. If no alert fires before the sampler expires, read the day's busiest windows instead (`idle < 20`).
 2. **Establish a steal baseline.** Average steal by hour over the full log. A node that loses a third of demand at all hours is a platform fact; a figure that swings points to a noisy neighbour.
 3. **Confirm the fix order from that evidence.** Step 4 is decided and proceeds regardless: it is correct on its own merits. The sampler determines what follows it.
@@ -139,6 +160,8 @@ One at a time. Steps 5 onward are production levers and each needs the operator'
 5. **Consider serial plans for the periodic warmers.** `SET LOCAL max_parallel_workers_per_gather = 0` inside the warm paths trades wall time for not occupying three processes on two vCPUs. Measure one task before generalising.
 6. **Review `random_page_cost`.** It is a cluster setting on a managed database, so a change affects every plan. Test per-session first on the statements in F2 and F5; do not change the cluster value without a before/after on the ship-standings and floor queries.
 7. **If steal proves chronic, raise it with DigitalOcean.** A support ticket citing sampled steal on a shared-CPU node costs nothing. A plan change to dedicated CPU is spend, and is the last option: this project minimises spend and never autoscales the database.
+
+8. **Stop heavy scan families from overlapping (the remaining cause; undecided).** F3 and F6 show three alerts from three different mixes. Candidates, cheapest first: stagger the startup fan-out so the three realms' ranked-correlation warmers run in sequence, not together; give the heaviest warm families a shared "one heavy scan at a time" lock; move the asia 10:30 ship-standings start off the eu recapture stripe. Each changes scheduling behaviour and needs the operator's choice. Until one lands, expect an alert on every backend deploy.
 
 After the 2026-11-26 maintenance, re-sample steal for one hour. If the node moves again, the figure may change in either direction, and that comparison is the only available evidence on the node-move question.
 
