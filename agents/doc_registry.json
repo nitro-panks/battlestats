@@ -4473,6 +4473,32 @@
                 "slope-re-measured-2026-10-04-and-stable"
             ]
         },
+        "agents/runbooks/runbook-db-cpu-alerts-steal-and-scan-bursts-2026-11-23.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "db cpu alert",
+                "CPU is running high",
+                "managed postgres steal",
+                "hot entity warmer scan",
+                "hot player score list daily",
+                "dbcpu sampler"
+            ],
+            "tags": [
+                "database",
+                "cpu",
+                "digitalocean",
+                "steal",
+                "pg_stat_statements",
+                "hot-entity-warmer"
+            ],
+            "archive_on": [
+                "fix shipped and seven alert-free days validated"
+            ]
+        },
         "agents/runbooks/runbook-db-table-shape-remediation-2026-09-20.md": {
             "kind": "runbook",
             "status": "active",
