@@ -6,6 +6,27 @@ _Context: DigitalOcean's "CPU is running high" alert fired on the managed Postgr
 _QA: every figure below was measured on 2026-11-23 between 21:45 and 21:58 UTC, from `pg_stat_statements`, the droplet journal, the DO API, or the `:9273` metrics endpoint. Nothing here is inferred from a dashboard._
 _Status 2026-11-23: **diagnosis PROVISIONAL (one sampled cycle); no code or configuration change shipped.** A read-only sampler is armed until about 2026-11-24 23:50 UTC. Operator decision recorded the same day: the hot-player score list should be computed once a day. **Resume at "Next steps", step 1.**_
 
+## QA Notes
+
+_Reviewed 2026-11-23 against `/home/august/code/battlestats/.claude/worktrees/db-cpu-alerts-runbook-1123` (linked worktree). 19 assertions checked, 6 corrected. At the operator's instruction the review was followed by implementation of step 4 in the same worktree; line numbers below are post-change._
+
+### Resolved
+- **"compute the list once per realm per day and have the warmer read the stored result" (step 4 premise: the list is used)** -> actual: the score list was the last of four sources and the dedup loop stopped at `limit`; on prod `_top_visited_entity_ids('player', 20)` returns 20 ids, which alone fills `HOT_ENTITY_PLAYER_LIMIT` (20), so the 32 s ranking was computed and discarded on every cycle (`server/warships/data.py:5486`, `server/warships/data.py:5412`) -> step 4 rewritten: sources are consulted lazily, and the score list is cached for a day for the case where it is reached. Expected runs: about zero per day, at most three.
+- **"The companion 'recent lookups' query ... must stay fresh; give it a `(realm, last_lookup DESC)` partial index"** -> actual: it is the third source and is likewise unreachable while top-visited fills the limit (`server/warships/data.py:5486`); prod holds 2,995 to 25,868 looked-up players per realm, so it always filled the remainder before the score list was reached -> index dropped from step 4; lazy evaluation removes the query without a migration.
+- **"guard recomputation with a lock"** -> actual: `warm_hot_entity_caches_task` already holds a per-realm `cache.add` lock for the whole warm (`server/warships/tasks.py:2148`) -> picked: no second lock. The only unlocked callers are two management commands, and a duplicate compute is one extra scan, not a correctness fault.
+- **"compute it only on a miss or from a once-daily striped task"** -> actual: Beat tasks are registered in a `post_migrate` receiver (`server/warships/signals.py:417`), so a new task needs a migrate and a schedule row -> picked: TTL cache on miss, `HOT_ENTITY_SCORE_IDS_TTL` default 26 h (`server/warships/data.py:172`). No Beat task, no migration.
+- **Step 4 named no tests** -> actual: only clan candidates were covered (`server/warships/tests/test_hot_entity_candidates.py:15`) -> added `server/warships/tests/test_hot_player_candidates.py` (five tests: laziness, priority order, reuse, empty-result caching, per-realm keys).
+- **"The F2 statement accrues about 3 calls per day" (Validation)** -> actual: with lazy sources the statement runs only when the first three sources fall short of `limit` (`server/warships/data.py:5486`) -> corrected to "at most 3 calls per day; about zero expected".
+
+### Unverified
+- All `pg_stat_statements`, steal, plan and sizing figures in F1 to F5: runtime measurements from 2026-11-23, not reproducible from the repository.
+- The alert policy slug `v1/dbaas/alerts/cpu_alerts` and its 90% / 5m threshold: taken from an operator note dated 2026-09-20; the DO alerts API was not re-queried.
+- "every 30 minutes per realm": `HOT_ENTITY_CACHE_WARM_MINUTES` defaults to 30 in code (`server/warships/signals.py:418`); the live value was not read, but the journal shows the resulting 10-minute cadence.
+- Sampler liveness after this review: it was running at 21:58 UTC and was not re-checked.
+
+### Open Questions
+1. **Should the hot-entity warmer warm the realm it was dispatched for?** `warm_hot_entity_caches` selects candidates for `realm` but calls `warm_player_entity_caches` and `warm_clan_entity_caches` without it (`server/warships/data.py:5571`, `server/warships/data.py:5575`), so both default to `na`. The top-visited list is also not realm-scoped (`server/warships/data.py:5416`). The eu and asia runs therefore warm only ids that happen to exist on NA: the asia run at 10:38 on 2026-11-23 warmed 4 of 20 player candidates. Passing `realm=realm` is a one-line fix, but it raises WG calls and database writes on eu and asia by up to 20 players and 10 clans per cycle, during a load investigation. Leaving it keeps load flat and the warmer largely idle outside NA. Not changed here. Blocks nothing; decide before step 5.
+
 ## Purpose
 
 Record what was measured about the managed-Postgres CPU alerts, separate what is established from what is not, and give the next agent an ordered path from the armed sampler to a fix. Read this before acting on any further "CPU is running high" mail, and before touching the hot-entity warmer or the database's planner settings.
@@ -109,12 +130,12 @@ One at a time. Steps 5 onward are production levers and each needs the operator'
    Record the steal share and the statements present. If no alert fires before the sampler expires, read the day's busiest windows instead (`idle < 20`).
 2. **Establish a steal baseline.** Average steal by hour over the full log. A node that loses a third of demand at all hours is a platform fact; a figure that swings points to a noisy neighbour.
 3. **Confirm the fix order from that evidence.** Step 4 is decided and proceeds regardless: it is correct on its own merits. The sampler determines what follows it.
-4. **Make the hot-player score list daily (code; decided, unshipped).** In `_get_hot_player_ids`, read the score-ranked ids from a per-realm cache key with a TTL slightly over 24 hours, and compute it only on a miss or from a once-daily striped task. Design points:
-   - A miss on the warm path must not run the 32-second scan inline every time the key is evicted under `allkeys-lru`; guard recomputation with a lock, and let the warmer proceed with the pinned, top-visited and recent-lookup candidates alone when the list is absent.
-   - If a daily Beat task is added, register it in `signals.py` with per-realm striping; schedule changes need a migrate.
-   - Optionally make the daily run itself cheap by driving from `PlayerExplorerSummary` with an index on `(realm, player_score DESC)`; at 3 runs a day this is an improvement, not a requirement.
-   - The companion "recent lookups" query (mean 4.6 s, still 144 runs a day) must stay fresh; give it a `(realm, last_lookup DESC)` partial index in the same change or a follow-up.
-   - Verify with `pg_stat_statements` deltas: the F2 statement's calls should rise by about 3 per day, and `warm_hot_entity_caches_task` durations in the journal should drop.
+4. **Make the hot-player score list daily (code; decided, implemented 2026-11-23).** QA found the list's result was discarded on every cycle, because earlier sources already fill the limit. As built in `server/warships/data.py`:
+   - `_get_hot_player_ids` consults its four sources lazily (pinned, top-visited, recent lookups, score) and stops querying once `limit` distinct ids are collected. Output order and content are unchanged.
+   - `_top_scored_player_ids` caches the per-realm score list under `hot_entity:score_player_ids:v1:<realm>:<limit>` for `HOT_ENTITY_SCORE_IDS_TTL` (26 h default). An empty list is cached too. On eviction under `allkeys-lru` the list is recomputed only if a cycle actually reaches the fourth source.
+   - No Beat task, no migration, no new index, no second lock (see QA Notes).
+   - Tests: `server/warships/tests/test_hot_player_candidates.py`.
+   - Verify with `pg_stat_statements` deltas: the F2 statement and the "recent lookups" statement should each stop accruing calls, and `warm_hot_entity_caches_task` durations in the journal should drop.
 5. **Consider serial plans for the periodic warmers.** `SET LOCAL max_parallel_workers_per_gather = 0` inside the warm paths trades wall time for not occupying three processes on two vCPUs. Measure one task before generalising.
 6. **Review `random_page_cost`.** It is a cluster setting on a managed database, so a change affects every plan. Test per-session first on the statements in F2 and F5; do not change the cluster value without a before/after on the ship-standings and floor queries.
 7. **If steal proves chronic, raise it with DigitalOcean.** A support ticket citing sampled steal on a shared-CPU node costs nothing. A plan change to dedicated CPU is spend, and is the last option: this project minimises spend and never autoscales the database.
@@ -126,7 +147,7 @@ After the 2026-11-26 maintenance, re-sample steal for one hour. If the node move
 A fix is validated when all of the following hold over seven days:
 
 - No "CPU is running high" mail from DigitalOcean.
-- The F2 statement accrues about 3 calls per day in `pg_stat_statements`.
+- The F2 statement accrues at most 3 calls per day in `pg_stat_statements`; about zero is expected.
 - `snapshot_active_players_task` durations stay under 120 s in the journal.
 
 Do not treat a quiet day as validation on its own; the alert fired on only two known days.

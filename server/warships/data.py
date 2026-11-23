@@ -166,6 +166,11 @@ HOT_ENTITY_PLAYER_LIMIT = max(
     1, int(os.getenv('HOT_ENTITY_PLAYER_LIMIT', '20')))
 HOT_ENTITY_CLAN_LIMIT = max(
     1, int(os.getenv('HOT_ENTITY_CLAN_LIMIT', '10')))
+# How long the per-realm "top players by score" candidate list is reused. The
+# ranking is a full-realm join and sort; once a day is the operator's decision
+# (2026-11-23). Slightly over 24h so a daily cycle never straddles an expiry.
+HOT_ENTITY_SCORE_IDS_TTL = max(
+    60, int(os.getenv('HOT_ENTITY_SCORE_IDS_TTL', str(26 * 60 * 60))))
 # Empty by default: pinning is opt-in via the HOT_ENTITY_PINNED_PLAYER_NAMES env
 # var. (Was historically defaulted to a single personal account, 'lil_boots';
 # removed 2026-05-28 at the owner's request so no specific record is perpetually
@@ -5438,36 +5443,75 @@ def _get_pinned_player_ids(realm: str = DEFAULT_REALM) -> list[int]:
     )
 
 
-def _get_hot_player_ids(limit: int = HOT_ENTITY_PLAYER_LIMIT, realm: str = DEFAULT_REALM) -> list[int]:
-    candidate_ids: list[int] = list(_get_pinned_player_ids(realm=realm))
-    candidate_ids.extend(_top_visited_entity_ids('player', limit))
-    candidate_ids.extend(
+def _hot_player_score_ids_cache_key(realm: str, limit: int) -> str:
+    return f'hot_entity:score_player_ids:v1:{realm}:{limit}'
+
+
+def _recently_looked_up_player_ids(limit: int, realm: str) -> list[int]:
+    return list(
         Player.objects.filter(realm=realm).exclude(name='').exclude(last_lookup__isnull=True).order_by(
             F('last_lookup').desc(nulls_last=True),
             'name',
         ).values_list('player_id', flat=True)[:limit]
     )
-    candidate_ids.extend(
+
+
+def _top_scored_player_ids(limit: int, realm: str) -> list[int]:
+    """The realm's top players by explorer score, computed at most once a day.
+
+    The ranking joins and sorts every visible player in the realm: 32 s mean
+    and ~2.2 GB read per run on prod, on three processes of a two-vCPU
+    database. It ran on every warm cycle (144 times a day) and was the largest
+    single statement in pg_stat_statements. Player score moves with the
+    nightly pipelines, so the list is cached for a day. An empty result is
+    cached too: it is a true answer, and recomputing it would cost the same
+    scan. Runbook: runbook-db-cpu-alerts-steal-and-scan-bursts-2026-11-23.md.
+    """
+    cache_key = _hot_player_score_ids_cache_key(realm, limit)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return list(cached)
+
+    ids = list(
         Player.objects.filter(realm=realm).exclude(name='').filter(is_hidden=False).select_related('explorer_summary').order_by(
             F('explorer_summary__player_score').desc(nulls_last=True),
             F('pvp_ratio').desc(nulls_last=True),
             'name',
         ).values_list('player_id', flat=True)[:limit]
     )
+    cache.set(cache_key, ids, HOT_ENTITY_SCORE_IDS_TTL)
+    return ids
+
+
+def _get_hot_player_ids(limit: int = HOT_ENTITY_PLAYER_LIMIT, realm: str = DEFAULT_REALM) -> list[int]:
+    """Up to ``limit`` distinct player ids to keep warm, in priority order.
+
+    Sources are consulted lazily, cheapest and most specific first, and a
+    later source is not queried once ``limit`` is reached. On prod the
+    top-visited list alone has filled the limit, so the two table-wide
+    rankings behind it were computed and then discarded on every cycle.
+    """
+    sources = (
+        lambda: _get_pinned_player_ids(realm=realm),
+        lambda: _top_visited_entity_ids('player', limit),
+        lambda: _recently_looked_up_player_ids(limit, realm),
+        lambda: _top_scored_player_ids(limit, realm),
+    )
 
     ordered_ids: list[int] = []
     seen_ids: set[int] = set()
-    for raw_id in candidate_ids:
-        try:
-            player_id = int(raw_id)
-        except (TypeError, ValueError):
-            continue
-        if player_id <= 0 or player_id in seen_ids:
-            continue
-        seen_ids.add(player_id)
-        ordered_ids.append(player_id)
-        if len(ordered_ids) >= limit:
-            break
+    for source in sources:
+        for raw_id in source():
+            try:
+                player_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            if player_id <= 0 or player_id in seen_ids:
+                continue
+            seen_ids.add(player_id)
+            ordered_ids.append(player_id)
+            if len(ordered_ids) >= limit:
+                return ordered_ids
     return ordered_ids
 
 
