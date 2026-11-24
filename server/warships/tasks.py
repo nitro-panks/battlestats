@@ -216,6 +216,13 @@ SHIPS_BUCKET_WARM_SPACING_SECONDS = int(
 # land on the same -c 3 `background` pool and hit a 2-vCPU managed Postgres.
 STARTUP_WARM_SPACING_SECONDS = int(
     os.getenv("STARTUP_WARM_SPACING_SECONDS", "20"))
+# The population-level startup warmers (distributions, correlations) each run
+# for minutes, not seconds: 20s spacing put all three realms' correlation
+# warmers on the database together after the 2026-11-23 deploy and held it at
+# 0% idle for seven minutes (a DigitalOcean CPU alert). They are spaced by more
+# than one run's duration so realms follow each other instead of overlapping.
+STARTUP_WARM_HEAVY_SPACING_SECONDS = int(
+    os.getenv("STARTUP_WARM_HEAVY_SPACING_SECONDS", "420"))
 HOT_ENTITY_CACHE_WARM_LOCK_TIMEOUT = 30 * 60
 CLAN_BATTLE_SUMMARY_REFRESH_DISPATCH_TIMEOUT = 10 * 60
 # Clan roster idle refresh: bulk account/info pass that corrects every member's
@@ -3443,9 +3450,18 @@ def startup_warm_caches_task():
     # warmers that matter to a first page load ahead of the population-level
     # aggregations. Spacing staggers arrival so twelve DB-heavy tasks don't
     # burst against a 2-vCPU managed Postgres at once.
-    warmers = (
+    #
+    # Two spacings (2026-11-23). The light warmers finish in seconds and keep
+    # the short stagger. The heavy ones run for minutes each, so they are
+    # spaced by STARTUP_WARM_HEAVY_SPACING_SECONDS: one realm's run completes
+    # before the next realm's starts. The last heavy dispatch lands about 37
+    # minutes after startup at the defaults; nothing here is load-bearing, and
+    # every one of these caches has its own Beat lane.
+    light_warmers = (
         warm_hot_entity_caches_task,
         bulk_load_entity_caches_task,
+    )
+    heavy_warmers = (
         warm_player_distributions_task,
         warm_player_correlations_task,
     )
@@ -3457,21 +3473,27 @@ def startup_warm_caches_task():
 
     realms = [DEFAULT_REALM] + sorted(VALID_REALMS - {DEFAULT_REALM})
 
-    spacing = 0
-    for warmer in warmers:
+    schedule = []
+    countdown = 0
+    for warmer in light_warmers:
         for realm in realms:
-            try:
-                warmer.apply_async(
-                    kwargs={"realm": realm},
-                    countdown=spacing * STARTUP_WARM_SPACING_SECONDS)
-                dispatched += 1
-            except Exception:
-                # One broker hiccup must not cost the warmers behind it.
-                failed += 1
-                logger.exception(
-                    "Failed to dispatch %s for realm=%s",
-                    warmer.name, realm)
-            spacing += 1
+            schedule.append((warmer, realm, countdown))
+            countdown += STARTUP_WARM_SPACING_SECONDS
+    for warmer in heavy_warmers:
+        for realm in realms:
+            schedule.append((warmer, realm, countdown))
+            countdown += STARTUP_WARM_HEAVY_SPACING_SECONDS
+
+    for warmer, realm, delay in schedule:
+        try:
+            warmer.apply_async(kwargs={"realm": realm}, countdown=delay)
+            dispatched += 1
+        except Exception:
+            # One broker hiccup must not cost the warmers behind it.
+            failed += 1
+            logger.exception(
+                "Failed to dispatch %s for realm=%s",
+                warmer.name, realm)
 
     # Kick off the continuous enrichment chain. This used to sit AFTER the
     # inline warm, so the soft-limit kill meant it never ran; Beat's

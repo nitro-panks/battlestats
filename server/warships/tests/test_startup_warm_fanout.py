@@ -145,3 +145,31 @@ class StartupWarmFanoutTests(TestCase):
             set(VALID_REALMS))
         enrich.assert_called_once()
         self.assertEqual(result["failed"], len(VALID_REALMS))
+
+    def test_heavy_warmers_never_start_closer_than_the_heavy_spacing(self):
+        # 2026-11-23: at one 20s spacing for all twelve, the three realms'
+        # correlation warmers (239-381s each) ran together after a deploy and
+        # held the 2-vCPU database at 0% idle for seven minutes. The minutes-long
+        # warmers must follow each other, and must start after every light one.
+        from warships import tasks
+
+        patches = self._patched()
+        with patches["warm_hot_entity_caches_task"] as hot, \
+                patches["bulk_load_entity_caches_task"] as bulk, \
+                patches["warm_player_distributions_task"] as dist, \
+                patches["warm_player_correlations_task"] as corr, \
+                patches["enrich"]:
+            tasks.startup_warm_caches_task()
+
+        def countdowns(*warmers):
+            return sorted(
+                c.kwargs["countdown"] for w in warmers for c in w.call_args_list)
+
+        light = countdowns(hot, bulk)
+        heavy = countdowns(dist, corr)
+        self.assertEqual(len(heavy), 2 * len(VALID_REALMS))
+        self.assertGreater(heavy[0], light[-1])
+        gaps = [b - a for a, b in zip(heavy, heavy[1:])]
+        self.assertEqual(
+            gaps, [tasks.STARTUP_WARM_HEAVY_SPACING_SECONDS] * (len(heavy) - 1))
+        self.assertGreaterEqual(tasks.STARTUP_WARM_HEAVY_SPACING_SECONDS, 400)

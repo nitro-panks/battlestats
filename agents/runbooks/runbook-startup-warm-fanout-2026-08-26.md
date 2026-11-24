@@ -109,7 +109,14 @@ compute nothing at all.
   realm gets its hot-entity warm before any realm's correlation warm, and `na`
   is no longer last in line (§2).
 - `STARTUP_WARM_SPACING_SECONDS` (default 20, env-overridable) staggers arrival,
-  mirroring `SHIPS_BUCKET_WARM_SPACING_SECONDS`.
+  mirroring `SHIPS_BUCKET_WARM_SPACING_SECONDS`. **Since 2026-11-23 it applies
+  only to the two light warmers** (hot entities, bulk load). The distributions
+  and correlations warmers run for minutes each and are spaced by
+  `STARTUP_WARM_HEAVY_SPACING_SECONDS` (default 420), after the light ones, so
+  realms follow each other; the last dispatch lands about 37 minutes after
+  startup. At 20 s the three realms' correlation warmers overlapped and held the
+  database at 0% idle for seven minutes:
+  `runbook-db-cpu-alerts-steal-and-scan-bursts-2026-11-23.md`, F6.
 - A failed dispatch is counted, logged and stepped over, so one broker hiccup
   cannot strand the eleven warmers behind it.
 - The task keeps `queue='background'` (pinned by
