@@ -4,7 +4,7 @@ _Created: 2026-11-23_
 _Lifecycle: dated-active · Owner: platform_
 _Context: DigitalOcean's "CPU is running high" alert fired on the managed Postgres on 2026-11-22 13:11 UTC and 2026-11-23 10:41 UTC (98.9% against a 90% / 5 minute policy). The operator described it as a recurring pattern and asked for the root cause._
 _QA: every figure below was measured on 2026-11-23 between 21:45 and 21:58 UTC, from `pg_stat_statements`, the droplet journal, the DO API, or the `:9273` metrics endpoint. Nothing here is inferred from a dashboard._
-_Status 2026-11-23 23:30 UTC: **step 4 shipped as v5.13.3 and verified; the alerts are NOT yet resolved.** Three alerts are now explained and each had a different workload mix (F3, F6), so the cause is low headroom under any two or three concurrent heavy scans, not one statement. A read-only sampler is armed until about 2026-11-24 23:50 UTC. **Resume at "Next steps", step 2, then decide step 8.**_
+_Status 2026-11-24 01:40 UTC: **step 4 shipped as v5.13.3 and the startup stagger (step 8, first candidate) as v5.13.4; both verified. The deploy-induced alert is closed; the two scheduled-overlap alerts are NOT yet addressed.** Three alerts are explained and each had a different workload mix (F3, F6), so the cause is low headroom under any two or three concurrent heavy scans, not one statement. A read-only sampler is armed until about 2026-11-24 23:50 UTC. **Resume at "Next steps", step 2, then decide the remaining step 8 candidates.**_
 
 ## QA Notes
 
@@ -114,6 +114,24 @@ Steal was only 4 to 12% in this window (`user` 45 to 49, `sys` 31 to 36): this s
 
 Across the 23:07 and 23:17 warm cycles the score-ranking statement stayed at 644 calls and the recent-lookups statement at 644 calls; both had been rising by one per cycle. `warm_hot_entity_caches_task` took 3.7 s at 23:17 against 25 to 82 s earlier in the day. Full backend suite: 1393 passed, 2 skipped.
 
+### Verification of the startup stagger (v5.13.4)
+
+The v5.13.4 backend deploy (release `20261123191038`) restarted gunicorn at 00:11:59 UTC on 11-24 and was itself the test. `startup_warm_caches_task` completed at 00:12:07.
+
+| measure | v5.13.3 deploy (F6) | v5.13.4 deploy |
+|---|---|---|
+| longest run of samples with idle < 10% | 7 minutes | about 90 s (9 samples at 10 s) |
+| samples with idle < 10%, 00:10 to 01:05 | not measured | 34 of 326 |
+| ranked-correlation warmers | three concurrent | sequential: 00:35:10 to 00:38:39 (209 s), 00:44:33 to 00:48:27 (233 s), 00:49:09 to 00:51:43 (153 s) |
+| DO alert mail | Triggered 23:11 | none |
+
+The three distributions warms finished at 00:14:41, 00:23:17 and 00:28:48 (34 s, 80 s, 41 s). The na Beat correlation lane at 00:45:00 skipped on the lock, as designed. Full backend suite: 1394 passed, 2 skipped.
+
+Two reads to keep:
+
+- **The deploy still produces short saturated minutes.** 00:16 and 00:23 averaged 2% and 1% idle. Neither lasted long enough to trip a 5-minute policy, but the headroom is thin: a deploy that lands on a scheduled heavy window could still alert.
+- **The worker receives all six heavy tasks at once and holds them until their ETA.** A journal showing six `received` lines at 00:12 is the stagger working, not failing; pair `received` to `succeeded` by task id.
+
 ## What is not established
 
 - Whether steal rose after the 2026-11-19 node move. No pre-move sample exists.
@@ -161,7 +179,7 @@ One at a time. Steps 5 onward are production levers and each needs the operator'
 6. **Review `random_page_cost`.** It is a cluster setting on a managed database, so a change affects every plan. Test per-session first on the statements in F2 and F5; do not change the cluster value without a before/after on the ship-standings and floor queries.
 7. **If steal proves chronic, raise it with DigitalOcean.** A support ticket citing sampled steal on a shared-CPU node costs nothing. A plan change to dedicated CPU is spend, and is the last option: this project minimises spend and never autoscales the database.
 
-8. **Stop heavy scan families from overlapping (the remaining cause; undecided).** F3 and F6 show three alerts from three different mixes. Candidates, cheapest first: stagger the startup fan-out so the three realms' ranked-correlation warmers run in sequence, not together; give the heaviest warm families a shared "one heavy scan at a time" lock; move the asia 10:30 ship-standings start off the eu recapture stripe. Each changes scheduling behaviour and needs the operator's choice. Until one lands, expect an alert on every backend deploy.
+8. **Stop heavy scan families from overlapping (the remaining cause; undecided).** F3 and F6 show three alerts from three different mixes. Candidates, cheapest first: stagger the startup fan-out so the three realms' ranked-correlation warmers run in sequence, not together; give the heaviest warm families a shared "one heavy scan at a time" lock; move the asia 10:30 ship-standings start off the eu recapture stripe. Each changes scheduling behaviour and needs the operator's choice. **The first candidate shipped as v5.13.4 and is verified above; a backend deploy no longer fires the alert by itself.** The other two remain undecided and are what the 11-22 and 11-23 10:31 alerts need.
    - **Operator chose the first candidate on 2026-11-23; implemented.** `startup_warm_caches_task` (`server/warships/tasks.py`) keeps the 20 s stagger for the hot-entity and bulk-load warmers and spaces the six distributions and correlations dispatches by `STARTUP_WARM_HEAVY_SPACING_SECONDS` (default 420), after the light ones. The last dispatch lands about 37 minutes after startup. Test: `test_startup_warm_fanout.py::test_heavy_warmers_never_start_closer_than_the_heavy_spacing`. One realm's three correlation metrics still run together, as they do on the daily Beat lane.
    - The other two candidates (a shared heavy-scan lock; moving the asia 10:30 start) remain undecided and are what the two original, non-deploy alerts need.
 
