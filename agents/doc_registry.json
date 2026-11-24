@@ -3756,6 +3756,36 @@
                 "steps-0-3-shipped-and-plateau-confirmed"
             ]
         },
+        "agents/runbooks/runbook-db-disk-recheck-2026-08-15.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "disk recheck",
+                "disk attribution",
+                "why is disk growing",
+                "battleobservation growth",
+                "compaction keep per player",
+                "disk runway 2026-08"
+            ],
+            "tags": [
+                "database",
+                "storage",
+                "capacity",
+                "disk",
+                "postgres",
+                "battleobservation",
+                "compaction",
+                "autovacuum",
+                "runway",
+                "digitalocean"
+            ],
+            "archive_on": [
+                "compaction-keep-fixed-and-levers-1-2-armed"
+            ]
+        },
         "agents/work-items/droplet-outbound-mail-spec.md": {
             "kind": "work-item",
             "status": "active",
