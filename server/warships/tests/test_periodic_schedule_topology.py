@@ -263,6 +263,34 @@ class ShipSnapshotFiresOncePerDayTests(TestCase):
             f"Ship snapshot firings collide across realms (hours={sorted(all_hours)})",
         )
 
+    def test_ship_snapshot_never_starts_inside_the_recapture_hour(self):
+        # The recapture sweeps run back to back for an hour (10:10/10:30/10:50
+        # at ~20 min each). A ship-standings chain started inside that hour
+        # overlaps a sweep for its whole run; asia at 10:30 did exactly that and
+        # contributed to the 2026-11-23 managed-PG CPU alert. Runbook:
+        # runbook-db-cpu-alerts-steal-and-scan-bursts-2026-11-23.md.
+        recapture_hours = {
+            int(PeriodicTask.objects.get(
+                name=f"recapture-lapsed-players-{realm}").crontab.hour)
+            for realm in VALID_REALMS
+        }
+        for realm in VALID_REALMS:
+            hour = int(PeriodicTask.objects.get(
+                name=f"ship-top-player-snapshot-{realm}").crontab.hour)
+            self.assertNotIn(
+                hour, recapture_hours,
+                f"ship-top-player-snapshot-{realm} fires at hour {hour}, "
+                f"inside the recapture block (hours={sorted(recapture_hours)})",
+            )
+
+    def test_ship_snapshot_default_hours(self):
+        hours = {
+            realm: PeriodicTask.objects.get(
+                name=f"ship-top-player-snapshot-{realm}").crontab.hour
+            for realm in VALID_REALMS
+        }
+        self.assertEqual(hours, {"na": "2", "eu": "6", "asia": "9"})
+
 
 class RetirementListPrunesOldRowsTests(TestCase):
     """Test 5: re-running registration deletes retired names."""

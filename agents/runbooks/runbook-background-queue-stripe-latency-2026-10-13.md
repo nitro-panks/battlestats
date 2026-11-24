@@ -211,6 +211,8 @@ Add `"rabbitmq-server"` and `"erlang-*"` to `Unattended-Upgrade::Package-Blackli
 
 ### N6 (schedule, after N1-N2 have settled): move the asia ship-standings stripe off 10:30
 
+**Shipped 2026-11-24 as v5.13.5, for a different reason:** asia now fires at 09:30 via `SHIP_SNAPSHOT_REALM_HOUR_OFFSETS` in `signals.py` (na 0, eu 4, asia 7), a third form that moves asia alone and leaves eu, na and the top-ships warmer where they were. The trigger was the managed-Postgres CPU alert, not the detector margin: `runbook-db-cpu-alerts-steal-and-scan-bursts-2026-11-23.md`. The margin to the 11:00 scan rises to about 87 minutes as a side effect. The paragraph below is the original analysis.
+
 Only if the asia margin is still the binding constraint after the load drops. Code form: `signals.py:262-263` `REALM_INTERVAL_OFFSETS.get(realm, 0) * 4` → `* 3` gives na 02:30 / eu 05:30 / asia 08:30 with no env change; `test_periodic_schedule_topology.py:215-230` requires one concrete hour per realm, not distinct hours. The top-ships warmer (`:209-213`) keys off `SHIP_BADGE_SNAPSHOT_HOUR + 1 + REALM_CRAWL_CRON_HOURS`, not the `* 4` stripe, so the code form leaves it untouched (eu 03:10, na 09:05, asia 15:15 today). Env form: pin `SHIP_BADGE_SNAPSHOT_HOUR=1` (asia 09:30, margin 90 min) and note it also shifts the top-ships warmer. Either moves asia's 81-167 s run plus its fan-out drain into the already dense 08:00-10:00 hour; it trades margin for load, which is why it is sequenced after the load fixes.
 
 ### N7 (structural, last): the queue split the strategy runbook already specifies

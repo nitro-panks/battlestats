@@ -19,6 +19,12 @@ REALM_CRAWL_CRON_HOURS = {'eu': 0, 'na': 6, 'asia': 12}
 # `_realm_crontab_for_cycle` below.
 REALM_INTERVAL_OFFSETS = {'na': 0, 'eu': 1, 'asia': 2}
 
+# Hours after SHIP_BADGE_SNAPSHOT_HOUR at which each realm's nightly
+# ship-standings snapshot fires (na 02:30 / eu 06:30 / asia 09:30 UTC at the
+# default). Not derived from REALM_INTERVAL_OFFSETS: asia sits at 7, not 8, to
+# stay out of the 10:10-11:10 recapture block. See the registration below.
+SHIP_SNAPSHOT_REALM_HOUR_OFFSETS = {'na': 0, 'eu': 4, 'asia': 7}
+
 
 def _realm_crontab_for_cycle(
     realm: str, cycle_minutes: int, base_minute: int = 0
@@ -242,11 +248,19 @@ def register_periodic_schedules(sender, **kwargs):
     # Beat fires once per realm per day; each run recomputes the trailing-window
     # board, so the profile badges + /ship standings turn over daily (gated by
     # SHIP_BADGE_SNAPSHOT_ENABLED). Per-realm hour striping keeps the three
-    # aggregations off each other: na 02:30 / eu 06:30 / asia 10:30 UTC via
-    # REALM_INTERVAL_OFFSETS*4. Those offsets predate this schedule — they were
-    # chosen when the period was 12h and firing hours had to be distinct *mod 12*
-    # (REALM_CRAWL_CRON_HOURS 0/6/12 would have collided, eu 0 == asia 12). Under
-    # a 24h period any distinct-hour striping works; *4 is kept because it is.
+    # aggregations off each other: na 02:30 / eu 06:30 / asia 09:30 UTC via
+    # SHIP_SNAPSHOT_REALM_HOUR_OFFSETS. Under a 24h period any distinct-hour
+    # striping works (the old *4 stride dated from a 12h period, where firing
+    # hours had to be distinct *mod 12*).
+    #
+    # 2026-11-24: asia moved 10:30 -> 09:30 (offset 8 -> 7). At 10:30 its chain
+    # (snapshot, treemap warms, then the ~20 min ships-pct fan-out) ran entirely
+    # inside the 10:10-11:10 recapture block, on the same minute as the eu
+    # recapture sweep and the Monday traffic digest; that mix held the managed
+    # Postgres above 90% CPU on 2026-11-23. 09:30 clears recapture and widens
+    # the margin to the 11:00 service-health scan from ~27 to ~87 minutes.
+    # na and eu are unchanged. Do not move asia back into hour 10:
+    # agents/runbooks/runbook-db-cpu-alerts-steal-and-scan-bursts-2026-11-23.md
     #
     # COST (measured 2026-08-18, 45d window, from the background worker journal):
     # na 98-161s, eu 269-347s, asia 81-167s per run — NOT the "~12s" this comment
@@ -260,7 +274,7 @@ def register_periodic_schedules(sender, **kwargs):
     ship_badge_hour = int(os.getenv("SHIP_BADGE_SNAPSHOT_HOUR", "2"))
     for realm in sorted(VALID_REALMS):
         realm_hour = (ship_badge_hour +
-                      REALM_INTERVAL_OFFSETS.get(realm, 0) * 4) % 24
+                      SHIP_SNAPSHOT_REALM_HOUR_OFFSETS.get(realm, 0)) % 24
         ship_badge_schedule, _ = CrontabSchedule.objects.get_or_create(
             minute="30",
             hour=str(realm_hour),

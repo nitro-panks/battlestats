@@ -33,7 +33,7 @@ snapshot task ──> compute (BattleEvent aggregate + shrinkage + z-score)
 - **Task:** `snapshot_ship_top_players_task` — `server/warships/tasks.py:1495`.
   Runs **per realm, once daily** on a striped crontab (`signals.py`
   `ship-top-player-snapshot-<realm>`; observed in the journal 2026-09-20..26 at
-  na 02:30, eu 06:35, asia 10:30 UTC), gated by `SHIP_BADGE_SNAPSHOT_ENABLED`.
+  na 02:30, eu 06:35, asia 09:30 UTC; asia was 10:30 until v5.13.5, 2026-11-24), gated by `SHIP_BADGE_SNAPSHOT_ENABLED`.
   A completed run logs `Finished snapshot_ship_top_players_task realm=<r>`,
   which puts it on the ops digest's per-realm success axis (2026-09-26).
   **Cost, measured 2026-09-26 on prod (EXPLAIN ANALYZE, eu):** 322s against the
